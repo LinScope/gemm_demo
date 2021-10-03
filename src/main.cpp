@@ -5,18 +5,20 @@
 
 using namespace pfnie;
 
-void device_memory_init(void* data, size_t length, Device dev)
+using dtype = float;
+
+void device_memory_init(dtype* data, size_t length, Device dev)
 {
   if (dev.type == DeviceType::Cpu)
-    memset(data, 1, length);
+    for (int i = 0; i < length; i++)
+      data[i] = 1;
+
   if (dev.type == DeviceType::Cuda)
     printf("Error, not impl\n");
 }
 
 int main(int argv, char* argc[])
 {
-  using dtype = float;
-
   const int iter  = 100;
   const int count = 10;
 
@@ -40,25 +42,27 @@ int main(int argv, char* argc[])
     array_b[i] = (dtype*)malloc(K * N * sizeof(dtype));
     array_c[i] = (dtype*)malloc(M * N * sizeof(dtype));
     array_o[i] = (dtype*)malloc(M * N * sizeof(dtype));
+    memset(array_c[i], 0, N * M * sizeof(dtype));
+    memset(array_o[i], 0, N * M * sizeof(dtype));
   }
 
   // init
   for (int i = 0; i < count; i++)
   {
-    device_memory_init((void*)array_a[i], M * K * sizeof(dtype), {DeviceType::Cpu, -1});
-    device_memory_init((void*)array_b[i], K * N * sizeof(dtype), {DeviceType::Cpu, -1});
-  }
-  
-  for (int i = 0; i < count; i++)
-  {
-    generic_gemm<dtype>(array_a[i % count], 
-                        array_b[i % count], 
-                        array_c[i % count], 
-                        M, K, N);
+    device_memory_init(array_a[i], M * K, {DeviceType::Cpu, -1});
+    device_memory_init(array_b[i], K * N, {DeviceType::Cpu, -1});
   }
 
-  chrono::milliseconds std_duration = milliseconds::zero();
-  chrono::milliseconds opt_duration = milliseconds::zero();
+  for (int i = 0; i < count; i++)
+  {
+    //generic_gemm<dtype>(array_a[i % count], 
+    //                    array_b[i % count], 
+    //                    array_a[i % count], 
+    //                    M, K, N);
+  }
+
+  chrono::microseconds std_duration = microseconds::zero();
+  chrono::microseconds opt_duration = microseconds::zero();
   for (int i = 0; i < iter; i++)
   {
     auto&& ck0 = chrono::high_resolution_clock::now();
@@ -69,29 +73,35 @@ int main(int argv, char* argc[])
                         M, K, N);
         
     auto&& ck1 = chrono::high_resolution_clock::now();
-    std_duration += duration_cast<milliseconds>(ck1 - ck0);
-
+    std_duration += duration_cast<microseconds>(ck1 - ck0);
+  }
+  
+  for (int i = 0; i < iter; i++)
+  {
     auto&& ck2 = chrono::high_resolution_clock::now();
     
-    generic_gemm<dtype>(array_a[i % count], 
-                        array_b[i % count], 
-                        array_o[i % count], 
-                        M, K, N);
+    opt_1_gemm<dtype>(array_a[i % count], 
+                      array_b[i % count], 
+                      array_o[i % count], 
+                      M, K, N);
     
     auto&& ck3 = chrono::high_resolution_clock::now();
-    opt_duration += duration_cast<milliseconds>(ck3 - ck2);
+    opt_duration += duration_cast<microseconds>(ck3 - ck2);
+  }
 
+  for (int i = 0; i < count; i++)
+  {
     if (define_compare)
     {
-      if (compare_array<dtype>(array_c[i % count], array_o[i % count], M * N) == false)
+      if (compare_array<dtype>(array_c[i], array_o[i], M * N) == false)
       {
         std::cout << "gemm result error, not match!" << std::endl;
       }
     }
   }
 
-  auto&& std_ms = float(std_duration.count()) / iter;
-  auto&& opt_ms = float(opt_duration.count()) / iter;
+  auto&& std_ms = float(std_duration.count()) / iter / 1000;
+  auto&& opt_ms = float(opt_duration.count()) / iter / 1000;
 
   printf("std gemm time cost = %f ms (%d x %d x %d - %d iter)\n",
       std_ms, M, K, N, iter);
